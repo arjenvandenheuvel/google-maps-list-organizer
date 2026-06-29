@@ -4,3 +4,5 @@ dist/
 tmp/
 playwright-state/
 .chrome-session/
+blackhole/
+master-locations.json

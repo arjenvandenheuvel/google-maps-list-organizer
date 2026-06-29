@@ -1,0 +1,19 @@
+# Dependencies
+node_modules
+
+# Local data
+tmp/
+.chrome-session/
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+
+# Docs
+*.md
+!PROJECT.md

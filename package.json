@@ -6,6 +6,8 @@
   "scripts": {
     "extract": "tsx src/extract.ts",
     "move": "tsx src/move.ts",
+    "add-places": "tsx src/add.ts",
+    "server": "tsx src/server.ts",
     "dev": "node --watch --import tsx/esm src/extract.ts",
     "typecheck": "tsc --noEmit",
     "launch-chrome": "'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --remote-debugging-port=9222 --user-data-dir=.chrome-session --no-first-run &",
@@ -15,7 +17,7 @@
     "node": ">=18"
   },
   "dependencies": {
-    "playwright": "^1.44.0"
+    "playwright": "^1.61.1"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

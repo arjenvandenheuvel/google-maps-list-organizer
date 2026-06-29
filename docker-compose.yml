@@ -1,0 +1,27 @@
+services:
+  maps-organizer:
+    build: .
+    container_name: maps-organizer
+    ports:
+      # noVNC web interface - access Chrome browser here
+      - "6080:6080"
+      # Web API for triggering extract/move
+      - "3001:3001"
+    volumes:
+      # Persist Chrome profile (Google login session)
+      - chrome-data:/chrome-data
+      # Persist tmp data (places.json, progress, etc.)
+      - ./tmp:/app/tmp
+      # Blackhole inbox - drop JSON files here to add places
+      - ./blackhole:/app/blackhole
+      # Master locations file - tracks all added places for dedup
+      - ./master-locations.json:/app/master-locations.json
+    environment:
+      # Set a token for API authentication (change this!)
+      - API_TOKEN=${API_TOKEN:-changeme}
+      # Display for Chrome
+      - DISPLAY=:99
+    restart: unless-stopped
+
+volumes:
+  chrome-data:
