@@ -61,7 +61,7 @@ RUN pnpm exec playwright install chromium
 COPY . .
 
 # Create directories
-RUN mkdir -p /app/tmp /app/blackhole /chrome-data && touch /app/master-locations.json && echo "[]" > /app/master-locations.json
+RUN mkdir -p /app/tmp /app/blackhole /app/data /chrome-data && echo "[]" > /app/data/master-locations.json
 
 # Set up supervisor config for multiple processes
 COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf

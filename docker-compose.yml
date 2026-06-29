@@ -1,6 +1,7 @@
 services:
   maps-organizer:
-    build: .
+    image: ghcr.io/arjenvandenheuvel/google-maps-list-organizer:latest
+    # build: .  # Uncomment to build locally instead of pulling image
     container_name: maps-organizer
     ports:
       # noVNC web interface - access Chrome browser here
@@ -11,17 +12,22 @@ services:
       # Persist Chrome profile (Google login session)
       - chrome-data:/chrome-data
       # Persist tmp data (places.json, progress, etc.)
-      - ./tmp:/app/tmp
+      - maps-tmp:/app/tmp
       # Blackhole inbox - drop JSON files here to add places
-      - ./blackhole:/app/blackhole
+      - maps-blackhole:/app/blackhole
       # Master locations file - tracks all added places for dedup
-      - ./master-locations.json:/app/master-locations.json
+      - maps-master:/app/data
     environment:
       # Set a token for API authentication (change this!)
       - API_TOKEN=${API_TOKEN:-changeme}
       # Display for Chrome
       - DISPLAY=:99
+      # Path for master locations file (inside maps-master volume)
+      - MASTER_FILE=/app/data/master-locations.json
     restart: unless-stopped
 
 volumes:
   chrome-data:
+  maps-tmp:
+  maps-blackhole:
+  maps-master:

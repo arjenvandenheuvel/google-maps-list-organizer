@@ -84,7 +84,7 @@ function getStatus(): object {
   const destFile = path.join(tmpDir, `${destSlug}-places.json`);
   const progressFile = path.join(tmpDir, 'progress.json');
   const failedFile = path.join(tmpDir, 'failed.json');
-  const masterFile = path.join(appDir, 'master-locations.json');
+  const masterFile = process.env.MASTER_FILE || path.join(appDir, 'master-locations.json');
   const addHandledFile = path.join(tmpDir, 'add-handled.json');
   const addFailedFile = path.join(tmpDir, 'add-failed.json');
 
