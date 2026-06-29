@@ -7,7 +7,58 @@ Run Google Maps List Organizer remotely via Docker with a web interface.
 - Docker and Docker Compose on your server
 - VPN access to your home network
 
-## Quick Start
+## Quick Start (Pre-built Image)
+
+Use the pre-built image from GitHub Container Registry:
+
+### 1. Create project directory on your server
+
+```bash
+mkdir -p ~/maps-organizer && cd ~/maps-organizer
+```
+
+### 2. Create docker-compose.yml
+
+```yaml
+services:
+  maps-organizer:
+    image: ghcr.io/arjenvandenheuvel/google-maps-list-organizer:latest
+    container_name: maps-organizer
+    ports:
+      - "6080:6080"
+      - "3001:3001"
+    volumes:
+      - chrome-data:/chrome-data
+      - ./tmp:/app/tmp
+      - ./blackhole:/app/blackhole
+      - ./master-locations.json:/app/master-locations.json
+    environment:
+      - API_TOKEN=${API_TOKEN:-changeme}
+      - DISPLAY=:99
+    restart: unless-stopped
+
+volumes:
+  chrome-data:
+```
+
+### 3. Set up environment and start
+
+```bash
+# Generate a secure token
+echo "API_TOKEN=$(openssl rand -hex 24)" > .env
+cat .env  # Save this token!
+
+# Create required files
+mkdir -p tmp blackhole
+echo "[]" > master-locations.json
+
+# Start
+docker compose up -d
+```
+
+## Alternative: Build Locally
+
+If you prefer to build the image yourself:
 
 ### 1. Copy files to your server
 
