@@ -25,6 +25,7 @@ services:
       # Path for master locations file (inside maps-master volume)
       - MASTER_FILE=/app/data/master-locations.json
     restart: unless-stopped
+    shm_size: '2gb'
 
 volumes:
   chrome-data:
