@@ -1,6 +1,7 @@
 import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { spawn, ChildProcess } from 'child_process';
 import { config, BOUNDS, destSlug } from './config';
 
@@ -8,6 +9,13 @@ const PORT = 3001;
 const API_TOKEN = process.env.API_TOKEN || 'changeme';
 const BLACKHOLE_DIR = path.join('/app', 'blackhole');
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB
+
+interface BlackholeFileStatus {
+  name: string;
+  status: 'pending' | 'handled';
+  handledAt?: string;
+  counts?: { added: number; already: number; skipped: number; failed: number };
+}
 
 interface JobState {
   id: string;
@@ -36,6 +44,10 @@ function checkAuth(req: http.IncomingMessage): boolean {
 function sendJson(res: http.ServerResponse, status: number, data: unknown) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(data, null, 2));
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 }
 
 function runCommand(command: 'extract' | 'move' | 'add-places', args: string[] = []): JobState {
@@ -96,9 +108,8 @@ function getStatus(): object {
   let failed = 0;
 
   // Blackhole/add stats
-  let blackholeFiles: string[] = [];
+  let blackholeFiles: BlackholeFileStatus[] = [];
   let masterLocations = 0;
-  let addHandledFiles = 0;
   let addFailed = 0;
 
   try {
@@ -114,16 +125,27 @@ function getStatus(): object {
     if (fs.existsSync(failedFile)) {
       failed = JSON.parse(fs.readFileSync(failedFile, 'utf-8')).length;
     }
-    // Blackhole stats
+    // Blackhole stats — match each file against the handled manifest by
+    // basename + content hash, same identity add.ts uses for its own dedup.
     if (fs.existsSync(blackholeDir)) {
+      const handled: Record<string, { hash: string; handledAt: string; counts: BlackholeFileStatus['counts'] }> =
+        fs.existsSync(addHandledFile) ? JSON.parse(fs.readFileSync(addHandledFile, 'utf-8')) : {};
       blackholeFiles = fs.readdirSync(blackholeDir)
-        .filter(f => f.toLowerCase().endsWith('.json'));
+        .filter(f => f.toLowerCase().endsWith('.json'))
+        .map((name): BlackholeFileStatus => {
+          const entry = handled[name];
+          if (entry) {
+            const content = fs.readFileSync(path.join(blackholeDir, name), 'utf-8');
+            const hash = crypto.createHash('sha256').update(content).digest('hex');
+            if (hash === entry.hash) {
+              return { name, status: 'handled', handledAt: entry.handledAt, counts: entry.counts };
+            }
+          }
+          return { name, status: 'pending' };
+        });
     }
     if (fs.existsSync(masterFile)) {
       masterLocations = JSON.parse(fs.readFileSync(masterFile, 'utf-8')).length;
-    }
-    if (fs.existsSync(addHandledFile)) {
-      addHandledFiles = Object.keys(JSON.parse(fs.readFileSync(addHandledFile, 'utf-8'))).length;
     }
     if (fs.existsSync(addFailedFile)) {
       addFailed = JSON.parse(fs.readFileSync(addFailedFile, 'utf-8')).length;
@@ -149,8 +171,8 @@ function getStatus(): object {
     blackhole: {
       files: blackholeFiles,
       fileCount: blackholeFiles.length,
-      handledFiles: addHandledFiles,
-      pendingFiles: blackholeFiles.length - addHandledFiles,
+      handledFiles: blackholeFiles.filter(f => f.status === 'handled').length,
+      pendingFiles: blackholeFiles.filter(f => f.status === 'pending').length,
       masterLocations,
       addFailed,
     },
@@ -164,21 +186,14 @@ function getStatus(): object {
   };
 }
 
-function getDashboardHtml(): string {
-  const status = getStatus() as {
-    config: { sourceList: string; destList: string };
-    data: { totalPlaces: number; destPlaces: number; moved: number; failed: number; remaining: number };
-    blackhole: { files: string[]; fileCount: number; handledFiles: number; pendingFiles: number; masterLocations: number; addFailed: number };
-    currentJob: { id: string; command: string; status: string; startedAt: string } | null;
-  };
+type DashboardStatus = {
+  config: { sourceList: string; destList: string };
+  data: { totalPlaces: number; destPlaces: number; moved: number; failed: number; remaining: number };
+  blackhole: { files: BlackholeFileStatus[]; fileCount: number; handledFiles: number; pendingFiles: number; masterLocations: number; addFailed: number };
+  currentJob: { id: string; command: string; status: string; startedAt: string } | null;
+};
 
-  return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Maps List Organizer</title>
-  <style>
+const PAGE_STYLES = `
     * { box-sizing: border-box; }
     :root { color-scheme: dark; }
     body {
@@ -191,6 +206,9 @@ function getDashboardHtml(): string {
     }
     h1 { color: #f1f3f4; margin-bottom: 5px; }
     .subtitle { color: #9aa0a6; margin-bottom: 20px; }
+    .tabs { display: flex; gap: 4px; margin: 14px 0 20px; border-bottom: 1px solid #2d2d2d; }
+    .tab { padding: 10px 16px; color: #9aa0a6; text-decoration: none; font-size: 14px; border-bottom: 2px solid transparent; }
+    .tab.active { color: #e8eaed; border-bottom-color: #4285f4; }
     .card {
       background: #1e1e1e;
       border: 1px solid #2d2d2d;
@@ -245,12 +263,103 @@ function getDashboardHtml(): string {
     }
     a { color: #8ab4f8; }
     details summary { color: #9aa0a6; }
-  </style>
+    .file-list { margin-top: 10px; border-top: 1px solid #2d2d2d; padding-top: 8px; }
+    .file-row { font-size: 13px; margin: 6px 0; }
+    .file-name { color: #e8eaed; overflow-wrap: anywhere; padding-right: 10px; }
+`;
+
+// Shared client-side helpers included on every page: auth token, API fetch
+// wrapper, and the job-status poller. Page-specific actions (extract/move
+// vs. add/upload) are appended by each page's own script block.
+const SHARED_SCRIPT = `
+    const token = localStorage.getItem('apiToken') || prompt('Enter API token:');
+    if (token) localStorage.setItem('apiToken', token);
+
+    async function api(method, path, body) {
+      const res = await fetch(path, {
+        method,
+        headers: {
+          'Authorization': 'Bearer ' + token,
+          'Content-Type': 'application/json'
+        },
+        body: body ? JSON.stringify(body) : undefined
+      });
+      return res.json();
+    }
+
+    async function runReset() {
+      if (confirm('Clear progress and failed files?')) {
+        await api('POST', '/reset');
+        location.reload();
+      }
+    }
+
+    async function pollStatus() {
+      const data = await api('GET', '/status');
+      const jobDiv = document.getElementById('jobStatus');
+      const outputDiv = document.getElementById('output');
+
+      if (data.currentJob) {
+        jobDiv.innerHTML = '<span class="status-' + data.currentJob.status + '">' +
+          data.currentJob.command + ': ' + data.currentJob.status + '</span>';
+        outputDiv.style.display = 'block';
+
+        // Fetch job output
+        const jobData = await api('GET', '/job/' + data.currentJob.id);
+        if (jobData.output) {
+          outputDiv.textContent = jobData.output.join('\\n');
+          outputDiv.scrollTop = outputDiv.scrollHeight;
+        }
+
+        if (data.currentJob.status === 'running') {
+          setTimeout(pollStatus, 2000);
+        } else {
+          // Refresh stats after completion
+          setTimeout(() => location.reload(), 1000);
+        }
+      }
+    }
+`;
+
+function pageShell(active: 'sort' | 'add', subtitle: string, body: string, pageScript: string, autoPoll: boolean): string {
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Maps List Organizer</title>
+  <style>${PAGE_STYLES}</style>
 </head>
 <body>
   <h1>Maps List Organizer</h1>
-  <p class="subtitle">${status.config.sourceList} → ${status.config.destList}</p>
+  <div class="tabs">
+    <a class="tab ${active === 'add' ? 'active' : ''}" href="/">Add Places</a>
+    <a class="tab ${active === 'sort' ? 'active' : ''}" href="/sort">Sort by City</a>
+  </div>
+  <p class="subtitle">${subtitle}</p>
 
+  ${body}
+
+  <div class="card">
+    <h2>Browser Access</h2>
+    <p>To log in to Google or debug:</p>
+    <a href="/vnc" target="_blank" class="btn btn-primary">Open Chrome (noVNC)</a>
+  </div>
+
+  <script>
+    ${SHARED_SCRIPT}
+    ${pageScript}
+    // Initial poll if job is running
+    ${autoPoll ? 'pollStatus();' : ''}
+  </script>
+</body>
+</html>`;
+}
+
+function getSortPageHtml(): string {
+  const status = getStatus() as DashboardStatus;
+
+  const body = `
   <div class="card">
     <h2>Progress</h2>
     <div class="stat-row">
@@ -286,6 +395,46 @@ function getDashboardHtml(): string {
   </div>
 
   <div class="card">
+    <h2>Actions</h2>
+    <div class="options">
+      <label>
+        <input type="checkbox" id="dryRun"> Dry run (navigate only)
+      </label>
+      <label>
+        Limit: <input type="number" id="limit" min="1" placeholder="all">
+      </label>
+    </div>
+    <div class="actions">
+      <button class="btn btn-primary" onclick="runExtract()" id="extractBtn">Extract Places</button>
+      <button class="btn btn-secondary" onclick="runMove()" id="moveBtn">Move Places</button>
+      <button class="btn btn-warning" onclick="runReset()" id="resetBtn">Reset Progress</button>
+    </div>
+  </div>`;
+
+  const script = `
+    async function runExtract() {
+      await api('POST', '/extract');
+      pollStatus();
+    }
+
+    async function runMove() {
+      const opts = {};
+      if (document.getElementById('dryRun').checked) opts.dryRun = true;
+      const limit = document.getElementById('limit').value;
+      if (limit) opts.limit = parseInt(limit);
+      await api('POST', '/move', opts);
+      pollStatus();
+    }
+  `;
+
+  return pageShell('sort', `${status.config.sourceList} → ${status.config.destList}`, body, script, status.currentJob?.status === 'running');
+}
+
+function getAddPageHtml(): string {
+  const status = getStatus() as DashboardStatus;
+
+  const body = `
+  <div class="card">
     <h2>Blackhole (Add New Places)</h2>
     <div class="stat-row">
       <span class="stat-label">Files in blackhole</span>
@@ -303,12 +452,33 @@ function getDashboardHtml(): string {
       <span class="stat-label">Add failed</span>
       <span class="stat" style="color: #f28b82">${status.blackhole.addFailed}</span>
     </div>
-    ${status.blackhole.files.length > 0 ? `<details style="margin-top: 10px;"><summary style="cursor: pointer; color: #9aa0a6;">Files: ${status.blackhole.files.join(', ')}</summary></details>` : ''}
+    ${status.blackhole.files.length > 0 ? `
+    <div class="file-list">
+      ${status.blackhole.files.map(f => `
+      <div class="stat-row file-row">
+        <span class="file-name">${escapeHtml(f.name)}</span>
+        <span class="${f.status === 'handled' ? 'status-completed' : 'status-running'}">
+          ${f.status === 'handled'
+            ? `handled${f.counts ? ` &middot; ${f.counts.added} added, ${f.counts.already} already, ${f.counts.failed} failed` : ''}`
+            : 'pending'}
+        </span>
+      </div>`).join('')}
+    </div>` : ''}
     <div style="margin-top: 14px;">
       <input type="file" id="uploadFile" accept="application/json,.json">
       <button class="btn" style="background: #9c27b0; color: white;" onclick="uploadFile()" id="uploadBtn">Upload to Blackhole</button>
       <div id="uploadStatus" style="margin-top: 8px; color: #9aa0a6; font-size: 14px;"></div>
     </div>
+  </div>
+
+  <div class="card">
+    <h2>Job Status</h2>
+    <div id="jobStatus">
+      ${status.currentJob
+        ? `<span class="status-${status.currentJob.status}">${status.currentJob.command}: ${status.currentJob.status}</span>`
+        : '<span style="color:#9aa0a6">No job running</span>'}
+    </div>
+    <div id="output" style="display: ${status.currentJob ? 'block' : 'none'}; margin-top: 10px;"></div>
   </div>
 
   <div class="card">
@@ -325,49 +495,11 @@ function getDashboardHtml(): string {
       </label>
     </div>
     <div class="actions">
-      <button class="btn btn-primary" onclick="runExtract()" id="extractBtn">Extract Places</button>
-      <button class="btn btn-secondary" onclick="runMove()" id="moveBtn">Move Places</button>
       <button class="btn" style="background: #9c27b0; color: white;" onclick="runAdd()" id="addBtn">Add from Blackhole</button>
-      <button class="btn btn-warning" onclick="runReset()" id="resetBtn">Reset Progress</button>
     </div>
-  </div>
+  </div>`;
 
-  <div class="card">
-    <h2>Browser Access</h2>
-    <p>To log in to Google or debug:</p>
-    <a href="/vnc" target="_blank" class="btn btn-primary">Open Chrome (noVNC)</a>
-  </div>
-
-  <script>
-    const token = localStorage.getItem('apiToken') || prompt('Enter API token:');
-    if (token) localStorage.setItem('apiToken', token);
-
-    async function api(method, path, body) {
-      const res = await fetch(path, {
-        method,
-        headers: {
-          'Authorization': 'Bearer ' + token,
-          'Content-Type': 'application/json'
-        },
-        body: body ? JSON.stringify(body) : undefined
-      });
-      return res.json();
-    }
-
-    async function runExtract() {
-      await api('POST', '/extract');
-      pollStatus();
-    }
-
-    async function runMove() {
-      const opts = {};
-      if (document.getElementById('dryRun').checked) opts.dryRun = true;
-      const limit = document.getElementById('limit').value;
-      if (limit) opts.limit = parseInt(limit);
-      await api('POST', '/move', opts);
-      pollStatus();
-    }
-
+  const script = `
     async function runAdd() {
       const opts = {};
       if (document.getElementById('dryRun').checked) opts.dryRun = true;
@@ -413,45 +545,9 @@ function getDashboardHtml(): string {
         statusDiv.textContent = 'Invalid JSON file: ' + err.message;
       }
     }
+  `;
 
-    async function runReset() {
-      if (confirm('Clear progress and failed files?')) {
-        await api('POST', '/reset');
-        location.reload();
-      }
-    }
-
-    async function pollStatus() {
-      const data = await api('GET', '/status');
-      const jobDiv = document.getElementById('jobStatus');
-      const outputDiv = document.getElementById('output');
-
-      if (data.currentJob) {
-        jobDiv.innerHTML = '<span class="status-' + data.currentJob.status + '">' +
-          data.currentJob.command + ': ' + data.currentJob.status + '</span>';
-        outputDiv.style.display = 'block';
-
-        // Fetch job output
-        const jobData = await api('GET', '/job/' + data.currentJob.id);
-        if (jobData.output) {
-          outputDiv.textContent = jobData.output.join('\\n');
-          outputDiv.scrollTop = outputDiv.scrollHeight;
-        }
-
-        if (data.currentJob.status === 'running') {
-          setTimeout(pollStatus, 2000);
-        } else {
-          // Refresh stats after completion
-          setTimeout(() => location.reload(), 1000);
-        }
-      }
-    }
-
-    // Initial poll if job is running
-    ${status.currentJob?.status === 'running' ? 'pollStatus();' : ''}
-  </script>
-</body>
-</html>`;
+  return pageShell('add', 'Add curated places straight to a list', body, script, status.currentJob?.status === 'running');
 }
 
 const server = http.createServer((req, res) => {
@@ -469,10 +565,16 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Dashboard - no auth required
+  // Dashboard pages - no auth required
   if (pathname === '/' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(getDashboardHtml());
+    res.end(getAddPageHtml());
+    return;
+  }
+
+  if (pathname === '/sort' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(getSortPageHtml());
     return;
   }
 
