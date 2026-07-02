@@ -180,26 +180,29 @@ function getDashboardHtml(): string {
   <title>Maps List Organizer</title>
   <style>
     * { box-sizing: border-box; }
+    :root { color-scheme: dark; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       max-width: 600px;
       margin: 0 auto;
       padding: 20px;
-      background: #f5f5f5;
+      background: #121212;
+      color: #e8eaed;
     }
-    h1 { color: #333; margin-bottom: 5px; }
-    .subtitle { color: #666; margin-bottom: 20px; }
+    h1 { color: #f1f3f4; margin-bottom: 5px; }
+    .subtitle { color: #9aa0a6; margin-bottom: 20px; }
     .card {
-      background: white;
+      background: #1e1e1e;
+      border: 1px solid #2d2d2d;
       border-radius: 8px;
       padding: 16px;
       margin-bottom: 16px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.4);
     }
-    .card h2 { margin-top: 0; font-size: 16px; color: #666; }
-    .stat { font-size: 24px; font-weight: bold; color: #333; }
+    .card h2 { margin-top: 0; font-size: 16px; color: #9aa0a6; }
+    .stat { font-size: 24px; font-weight: bold; color: #e8eaed; }
     .stat-row { display: flex; justify-content: space-between; margin: 8px 0; }
-    .stat-label { color: #666; }
+    .stat-label { color: #9aa0a6; }
     .btn {
       display: inline-block;
       padding: 12px 24px;
@@ -212,13 +215,13 @@ function getDashboardHtml(): string {
     }
     .btn-primary { background: #4285f4; color: white; }
     .btn-secondary { background: #34a853; color: white; }
-    .btn-warning { background: #fbbc04; color: #333; }
-    .btn:disabled { background: #ccc; cursor: not-allowed; }
-    .status-running { color: #4285f4; }
-    .status-completed { color: #34a853; }
-    .status-failed { color: #ea4335; }
+    .btn-warning { background: #fbbc04; color: #202124; }
+    .btn:disabled { background: #3c4043; color: #9aa0a6; cursor: not-allowed; }
+    .status-running { color: #8ab4f8; }
+    .status-completed { color: #81c995; }
+    .status-failed { color: #f28b82; }
     #output {
-      background: #1e1e1e;
+      background: #0a0a0a;
       color: #d4d4d4;
       padding: 12px;
       border-radius: 6px;
@@ -231,8 +234,17 @@ function getDashboardHtml(): string {
     }
     .actions { text-align: center; margin: 20px 0; }
     .options { margin: 10px 0; }
-    .options label { display: block; margin: 5px 0; }
-    .options input[type="number"] { width: 80px; padding: 4px; }
+    .options label { display: block; margin: 5px 0; color: #e8eaed; }
+    .options input[type="number"] {
+      width: 80px;
+      padding: 4px;
+      background: #2d2d2d;
+      color: #e8eaed;
+      border: 1px solid #3c4043;
+      border-radius: 4px;
+    }
+    a { color: #8ab4f8; }
+    details summary { color: #9aa0a6; }
   </style>
 </head>
 <body>
@@ -251,11 +263,11 @@ function getDashboardHtml(): string {
     </div>
     <div class="stat-row">
       <span class="stat-label">Moved</span>
-      <span class="stat" style="color: #34a853">${status.data.moved}</span>
+      <span class="stat" style="color: #81c995">${status.data.moved}</span>
     </div>
     <div class="stat-row">
       <span class="stat-label">Failed</span>
-      <span class="stat" style="color: #ea4335">${status.data.failed}</span>
+      <span class="stat" style="color: #f28b82">${status.data.failed}</span>
     </div>
     <div class="stat-row">
       <span class="stat-label">Remaining</span>
@@ -268,7 +280,7 @@ function getDashboardHtml(): string {
     <div id="jobStatus">
       ${status.currentJob
         ? `<span class="status-${status.currentJob.status}">${status.currentJob.command}: ${status.currentJob.status}</span>`
-        : '<span style="color:#666">No job running</span>'}
+        : '<span style="color:#9aa0a6">No job running</span>'}
     </div>
     <div id="output" style="display: ${status.currentJob ? 'block' : 'none'}; margin-top: 10px;"></div>
   </div>
@@ -285,17 +297,17 @@ function getDashboardHtml(): string {
     </div>
     <div class="stat-row">
       <span class="stat-label">Master locations</span>
-      <span class="stat" style="color: #34a853">${status.blackhole.masterLocations}</span>
+      <span class="stat" style="color: #81c995">${status.blackhole.masterLocations}</span>
     </div>
     <div class="stat-row">
       <span class="stat-label">Add failed</span>
-      <span class="stat" style="color: #ea4335">${status.blackhole.addFailed}</span>
+      <span class="stat" style="color: #f28b82">${status.blackhole.addFailed}</span>
     </div>
-    ${status.blackhole.files.length > 0 ? `<details style="margin-top: 10px;"><summary style="cursor: pointer; color: #666;">Files: ${status.blackhole.files.join(', ')}</summary></details>` : ''}
+    ${status.blackhole.files.length > 0 ? `<details style="margin-top: 10px;"><summary style="cursor: pointer; color: #9aa0a6;">Files: ${status.blackhole.files.join(', ')}</summary></details>` : ''}
     <div style="margin-top: 14px;">
       <input type="file" id="uploadFile" accept="application/json,.json">
       <button class="btn" style="background: #9c27b0; color: white;" onclick="uploadFile()" id="uploadBtn">Upload to Blackhole</button>
-      <div id="uploadStatus" style="margin-top: 8px; color: #666; font-size: 14px;"></div>
+      <div id="uploadStatus" style="margin-top: 8px; color: #9aa0a6; font-size: 14px;"></div>
     </div>
   </div>
 
@@ -388,16 +400,16 @@ function getDashboardHtml(): string {
         });
         const data = await res.json();
         if (res.ok) {
-          statusDiv.style.color = '#34a853';
+          statusDiv.style.color = '#81c995';
           statusDiv.textContent = 'Uploaded ' + data.filename;
           input.value = '';
           setTimeout(() => location.reload(), 1000);
         } else {
-          statusDiv.style.color = '#ea4335';
+          statusDiv.style.color = '#f28b82';
           statusDiv.textContent = 'Error: ' + data.error;
         }
       } catch (err) {
-        statusDiv.style.color = '#ea4335';
+        statusDiv.style.color = '#f28b82';
         statusDiv.textContent = 'Invalid JSON file: ' + err.message;
       }
     }
