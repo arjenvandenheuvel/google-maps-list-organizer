@@ -6,6 +6,8 @@ import { config, BOUNDS, destSlug } from './config';
 
 const PORT = 3001;
 const API_TOKEN = process.env.API_TOKEN || 'changeme';
+const BLACKHOLE_DIR = path.join('/app', 'blackhole');
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB
 
 interface JobState {
   id: string;
@@ -79,7 +81,7 @@ function runCommand(command: 'extract' | 'move' | 'add-places', args: string[] =
 function getStatus(): object {
   const appDir = '/app';
   const tmpDir = path.join(appDir, 'tmp');
-  const blackholeDir = path.join(appDir, 'blackhole');
+  const blackholeDir = BLACKHOLE_DIR;
   const placesFile = path.join(tmpDir, 'places.json');
   const destFile = path.join(tmpDir, `${destSlug}-places.json`);
   const progressFile = path.join(tmpDir, 'progress.json');
@@ -290,6 +292,11 @@ function getDashboardHtml(): string {
       <span class="stat" style="color: #ea4335">${status.blackhole.addFailed}</span>
     </div>
     ${status.blackhole.files.length > 0 ? `<details style="margin-top: 10px;"><summary style="cursor: pointer; color: #666;">Files: ${status.blackhole.files.join(', ')}</summary></details>` : ''}
+    <div style="margin-top: 14px;">
+      <input type="file" id="uploadFile" accept="application/json,.json">
+      <button class="btn" style="background: #9c27b0; color: white;" onclick="uploadFile()" id="uploadBtn">Upload to Blackhole</button>
+      <div id="uploadStatus" style="margin-top: 8px; color: #666; font-size: 14px;"></div>
+    </div>
   </div>
 
   <div class="card">
@@ -357,6 +364,42 @@ function getDashboardHtml(): string {
       if (limit) opts.limit = parseInt(limit);
       await api('POST', '/add', opts);
       pollStatus();
+    }
+
+    async function uploadFile() {
+      const input = document.getElementById('uploadFile');
+      const statusDiv = document.getElementById('uploadStatus');
+      const file = input.files[0];
+      if (!file) {
+        statusDiv.textContent = 'Choose a .json file first';
+        return;
+      }
+      statusDiv.textContent = 'Uploading...';
+      try {
+        const text = await file.text();
+        JSON.parse(text); // validate before sending
+        const res = await fetch('/upload?filename=' + encodeURIComponent(file.name), {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'application/json'
+          },
+          body: text
+        });
+        const data = await res.json();
+        if (res.ok) {
+          statusDiv.style.color = '#34a853';
+          statusDiv.textContent = 'Uploaded ' + data.filename;
+          input.value = '';
+          setTimeout(() => location.reload(), 1000);
+        } else {
+          statusDiv.style.color = '#ea4335';
+          statusDiv.textContent = 'Error: ' + data.error;
+        }
+      } catch (err) {
+        statusDiv.style.color = '#ea4335';
+        statusDiv.textContent = 'Invalid JSON file: ' + err.message;
+      }
     }
 
     async function runReset() {
@@ -509,6 +552,49 @@ const server = http.createServer((req, res) => {
       }
       const job = runCommand('add-places', args);
       sendJson(res, 202, { message: 'Add started', job });
+    });
+    return;
+  }
+
+  // POST /upload?filename=NAME.json - drop a trip JSON file into the blackhole dir
+  if (pathname === '/upload' && req.method === 'POST') {
+    const rawName = url.searchParams.get('filename') || '';
+    const safeName = path.basename(rawName);
+    if (!/^[a-zA-Z0-9._-]+\.json$/.test(safeName)) {
+      sendJson(res, 400, { error: 'filename must be a plain .json name (letters, numbers, ._- only)' });
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let tooLarge = false;
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_UPLOAD_BYTES) {
+        tooLarge = true;
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      if (tooLarge) {
+        sendJson(res, 413, { error: `File too large (max ${MAX_UPLOAD_BYTES / 1024 / 1024}MB)` });
+        return;
+      }
+      const body = Buffer.concat(chunks).toString('utf-8');
+      try {
+        JSON.parse(body);
+      } catch {
+        sendJson(res, 400, { error: 'Body is not valid JSON' });
+        return;
+      }
+      try {
+        fs.mkdirSync(BLACKHOLE_DIR, { recursive: true });
+        fs.writeFileSync(path.join(BLACKHOLE_DIR, safeName), body);
+        sendJson(res, 200, { message: 'Uploaded', filename: safeName });
+      } catch (err) {
+        sendJson(res, 500, { error: 'Failed to write file', details: String(err) });
+      }
     });
     return;
   }
